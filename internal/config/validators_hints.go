@@ -129,6 +129,7 @@ func (c *Config) ValidateHints(warnings *Warnings) error {
 		c.validateHintSearchInputPlacement,
 		c.validateHintScanDepth,
 		c.validateHintMissionControl,
+		c.validateHintOnSelect,
 		c.validateHintVocabulary,
 		func() error { return validateHintsVisionConfig(c.Hints.Vision) },
 	}
@@ -416,8 +417,8 @@ func (c *Config) validateHintMissionControl() error {
 	)
 }
 
-// validateMissionControlSteps checks one list of Mission Control steps.
-func validateMissionControlSteps(field string, steps []string) error {
+// validateActionSteps checks one list of action steps configured for a setting or hook.
+func validateActionSteps(field string, steps []string) error {
 	for idx, actionStr := range steps {
 		trimmed := strings.TrimSpace(actionStr)
 		if trimmed == "" {
@@ -442,6 +443,15 @@ func validateMissionControlSteps(field string, steps []string) error {
 	}
 
 	return nil
+}
+
+// validateMissionControlSteps checks one list of Mission Control steps.
+func validateMissionControlSteps(field string, steps []string) error {
+	return validateActionSteps(field, steps)
+}
+
+func (c *Config) validateHintOnSelect() error {
+	return validateActionSteps("hints.on_select", c.Hints.OnSelect)
 }
 
 // validateHintVocabulary checks the settings that name one of a fixed set of

@@ -182,6 +182,84 @@ func (h *handlerState) runOnExit(onExit []string) {
 	}()
 }
 
+// parseSingleMode returns the mode if steps names exactly one mode (such as
+// "scroll", "grid", "hints", "recursive_grid", or "idle").
+func parseSingleMode(steps []string) (domain.Mode, bool) {
+	if len(steps) != 1 {
+		return domain.ModeIdle, false
+	}
+
+	step := strings.TrimSpace(steps[0])
+	switch step {
+	case domain.ModeString(domain.ModeScroll):
+		return domain.ModeScroll, true
+	case domain.ModeString(domain.ModeHints):
+		return domain.ModeHints, true
+	case domain.ModeString(domain.ModeGrid):
+		return domain.ModeGrid, true
+	case domain.ModeString(domain.ModeRecursiveGrid):
+		return domain.ModeRecursiveGrid, true
+	case domain.ModeString(domain.ModeIdle):
+		return domain.ModeIdle, true
+	case domain.ModeString(domain.ModeMonitorSelect):
+		return domain.ModeMonitorSelect, true
+	default:
+		return domain.ModeIdle, false
+	}
+}
+
+// handleOnSelect processes the configured on_select actions after a selection.
+// When on_select names a single mode (such as "scroll" or "idle"), it transitions
+// immediately under the existing lock without releasing the event tap or evdev grab.
+// For action sequences, it dispatches asynchronously.
+func (h *handlerState) handleOnSelect(onSelect []string) {
+	if len(onSelect) == 0 {
+		return
+	}
+
+	h.appState.SetModeExitReason(state.ModeExitReasonCompleted)
+
+	if mode, ok := parseSingleMode(onSelect); ok {
+		h.activateModeUnderLock(modecmd.Activation{Mode: mode})
+
+		return
+	}
+
+	initialMode := h.appState.CurrentMode()
+	h.runOnSelect(initialMode, onSelect)
+}
+
+// runOnSelect dispatches the mode's on_select steps after a selection was
+// completed without a pending action.
+func (h *handlerState) runOnSelect(initialMode domain.Mode, onSelect []string) {
+	if len(onSelect) == 0 || h.executeActionSequence == nil {
+		return
+	}
+
+	steps := append([]string(nil), onSelect...)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				h.logger.Error("panic in on-select handler",
+					zap.Any("recover", r),
+					zap.Int("steps", len(steps)))
+			}
+		}()
+
+		h.executeActionSequence("on-select", steps)
+
+		if h.outer != nil {
+			h.outer.mu.Lock()
+			defer h.outer.mu.Unlock()
+
+			if h.appState.CurrentMode() == initialMode {
+				h.exitMode()
+			}
+		}
+	}()
+}
+
 // moveCursorAndHandleAction moves the cursor to a point and executes any pending action.
 func (h *handlerState) moveCursorAndHandleAction(
 	point image.Point,
@@ -246,6 +324,16 @@ func (h *handlerState) handleHintsModeKey(key string) {
 		captureScopeOverride := h.hints.Context.CaptureScopeOverride()
 		labelDirectionOverride := h.hints.Context.LabelDirectionOverride()
 		splitWord := h.hints.Context.SplitWord()
+
+		if pendingAction == nil && len(h.config.Hints.OnSelect) > 0 {
+			moveCursorErr := h.actionService.MoveCursorToPoint(h.ctx, center)
+			if moveCursorErr != nil {
+				h.logger.Error("Failed to move cursor", zap.Error(moveCursorErr))
+			}
+			h.handleOnSelect(h.config.Hints.OnSelect)
+
+			return
+		}
 
 		h.moveCursorAndHandleAction(
 			center,
@@ -499,6 +587,16 @@ func (h *handlerState) handleGridModeKey(key string) {
 		pendingAction := h.grid.Context.PendingAction()
 		pendingModifier := h.grid.Context.PendingModifier()
 		cursorFollowSelection := h.grid.Context.CursorFollowSelection()
+
+		if pendingAction == nil && len(h.config.Grid.OnSelect) > 0 {
+			moveCursorErr := h.actionService.MoveCursorToPoint(h.ctx, absolutePoint)
+			if moveCursorErr != nil {
+				h.logger.Error("Failed to move cursor", zap.Error(moveCursorErr))
+			}
+			h.handleOnSelect(h.config.Grid.OnSelect)
+
+			return
+		}
 
 		if pendingAction == nil && !repeat && !cursorFollowSelection {
 			h.refreshGridVirtualPointer()

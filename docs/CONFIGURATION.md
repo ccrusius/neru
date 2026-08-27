@@ -794,6 +794,7 @@ Start with search visible: `neru hints --search` (see [CLI.md](CLI.md#neru-hints
 | `detect_mission_control`           | bool         | `false`                 | Enable Mission Control state detection                                                                                                                                                                                                                                                                                               |
 | `on_mission_control_activated`     | string/array | none                    | Action(s) to execute when Mission Control opens                                                                                                                                                                                                                                                                                      |
 | `on_mission_control_deactivated`   | string/array | none                    | Action(s) to execute when Mission Control closes                                                                                                                                                                                                                                                                                     |
+| `on_select`                        | string/array | none                    | Action(s) to execute when a hint is selected without a CLI `--action` (e.g. `"scroll"` or `["scroll"]`)                                                                                                                                                                                                                    |
 | `additional_menubar_hints_targets` | array        | macOS-specific defaults | Extra menubar bundle IDs                                                                                                                                                                                                                                                                                                             |
 | `clickable_roles`                  | array        | shared semantic defaults | Roles that generate hints. See [Clickable roles](#clickable-roles)                                                                                                                                                                                                                                                                  |
 | `ignore_clickable_check`           | bool         | `false`                 | Skip clickability heuristic                                                                                                                                                                                                                                                                                                          |
@@ -1066,8 +1067,9 @@ Cursor behavior is chosen per invocation: `neru grid --cursor-selection-mode fol
 | `col_labels`        | string | `""`                          | Custom column labels; empty is resolved the same way as `row_labels`                       |
 | `live_match_update` | bool   | `true`                        | Highlight cells as you type |
 | `hide_unmatched`    | bool   | `true`                        | Hide non-matching cells     |
-| `prewarm_enabled`   | bool   | `true`                        | Pre-compute grid on startup |
-| `enable_gc`         | bool   | `false`                       | Periodic memory cleanup     |
+| `prewarm_enabled`   | bool         | `true`                        | Pre-compute grid on startup |
+| `enable_gc`         | bool         | `false`                       | Periodic memory cleanup     |
+| `on_select`         | string/array | none                          | Action(s) to execute when a grid selection completes without a CLI `--action` |
 
 **The label sets are checked when the config loads.** `characters`, `row_labels`
 and `col_labels` all name cells you then have to type, so `neru config validate`
@@ -1144,8 +1146,9 @@ Cursor behavior: `neru recursive_grid --cursor-selection-mode follow|hold` (see 
 | `keys`            | string | `"rtyfghvbn"` | Cell selection keys (must be `grid_cols × grid_rows` characters) |
 | `min_size_width`  | int    | `1`           | Minimum cell width in pixels                                     |
 | `min_size_height` | int    | `1`           | Minimum cell height in pixels                                    |
-| `max_depth`       | int    | `10`          | Maximum recursion levels (1–20)                                  |
-| `layers`          | array  | `[]`          | Per-depth layout overrides (see below)                           |
+| `max_depth`       | int          | `10`          | Maximum recursion levels (1–20)                                  |
+| `on_select`       | string/array | none          | Action(s) to execute when a recursive grid selection completes without a CLI `--action` |
+| `layers`          | array        | `[]`          | Per-depth layout overrides (see below)                           |
 
 #### Layers
 

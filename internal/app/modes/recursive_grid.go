@@ -225,6 +225,16 @@ func (h *handlerState) handleRecursiveGridKey(key string) {
 		pendingModifier := h.recursiveGrid.Context.PendingModifier()
 		cursorFollowSelection := h.recursiveGrid.Context.CursorFollowSelection()
 
+		if pendingAction == nil && len(h.config.RecursiveGrid.OnSelect) > 0 {
+			moveCursorErr := h.actionService.MoveCursorToPoint(ctx, absoluteCenter)
+			if moveCursorErr != nil {
+				h.logger.Error("Failed to move cursor", zap.Error(moveCursorErr))
+			}
+			h.handleOnSelect(h.config.RecursiveGrid.OnSelect)
+
+			return
+		}
+
 		if pendingAction == nil && !repeat && !cursorFollowSelection {
 			h.refreshRecursiveGridVirtualPointer()
 

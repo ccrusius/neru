@@ -488,6 +488,7 @@ func defaultHints() HintsConfig {
 		DetectMissionControl:          false,
 		OnMissionControlActivated:     nil,
 		OnMissionControlDeactivated:   nil,
+		OnSelect:                      nil,
 
 		// Semantic role names resolve to each platform's native
 		// accessibility vocabulary at load time, so one default serves
@@ -519,6 +520,7 @@ func defaultGrid() GridConfig {
 		// from everyone who only sets characters.
 		RowLabels: "",
 		ColLabels: "",
+		OnSelect:  nil,
 
 		Hotkeys: map[string]StringOrStringArray{
 			KeyDisplayEscape:    {CmdIdle},
@@ -607,6 +609,7 @@ func defaultRecursiveGrid() RecursiveGridConfig {
 		MinSizeWidth:  DefaultRecursiveGridMinSizeWidth,
 		MinSizeHeight: DefaultRecursiveGridMinSizeHeight,
 		MaxDepth:      DefaultRecursiveGridMaxDepth,
+		OnSelect:      nil,
 	}
 }
 

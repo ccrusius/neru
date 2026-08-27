@@ -377,6 +377,7 @@ type HintsConfig struct {
 	DetectMissionControl          bool                `json:"detectMissionControl"          toml:"detect_mission_control"`
 	OnMissionControlActivated     StringOrStringArray `json:"onMissionControlActivated"     toml:"on_mission_control_activated"`
 	OnMissionControlDeactivated   StringOrStringArray `json:"onMissionControlDeactivated"   toml:"on_mission_control_deactivated"`
+	OnSelect                      StringOrStringArray `json:"onSelect"                      toml:"on_select"`
 
 	ClickableRoles       []string `json:"clickableRoles"       toml:"clickable_roles"`
 	IgnoreClickableCheck bool     `json:"ignoreClickableCheck" toml:"ignore_clickable_check"`
@@ -414,8 +415,9 @@ type GridConfig struct {
 	UI              GridUI `json:"ui"              toml:"ui"`
 	LiveMatchUpdate bool   `json:"liveMatchUpdate" toml:"live_match_update"`
 	HideUnmatched   bool   `json:"hideUnmatched"   toml:"hide_unmatched"`
-	PrewarmEnabled  bool   `json:"prewarmEnabled"  toml:"prewarm_enabled"`
-	EnableGC        bool   `json:"enableGc"        toml:"enable_gc"`
+	PrewarmEnabled  bool                `json:"prewarmEnabled"  toml:"prewarm_enabled"`
+	EnableGC        bool                `json:"enableGc"        toml:"enable_gc"`
+	OnSelect        StringOrStringArray `json:"onSelect"        toml:"on_select"`
 
 	AppConfigs []AppConfig `json:"appConfigs" toml:"app_configs"`
 
@@ -479,6 +481,8 @@ type RecursiveGridConfig struct {
 	// Per-depth overrides for grid dimensions and keys.
 	// Depths not listed here use the top-level GridCols/GridRows/Keys.
 	Layers []RecursiveGridLayerConfig `json:"layers" toml:"layers"`
+
+	OnSelect StringOrStringArray `json:"onSelect" toml:"on_select"`
 
 	AppConfigs []AppConfig `json:"appConfigs" toml:"app_configs"`
 

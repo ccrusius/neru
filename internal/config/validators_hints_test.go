@@ -200,3 +200,27 @@ func TestLabelDirectionForApp(t *testing.T) {
 		t.Errorf("LabelDirectionForApp(empty global) = %q, want %q", got, dirNormal)
 	}
 }
+
+func TestValidateHints_OnSelect(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Hints.OnSelect = config.StringOrStringArray{"scroll"}
+
+	err := cfg.ValidateHints(nil)
+	if err != nil {
+		t.Fatalf("ValidateHints() expected valid on_select, got %v", err)
+	}
+
+	// Empty step rejected
+	cfg.Hints.OnSelect = config.StringOrStringArray{""}
+	err = cfg.ValidateHints(nil)
+	if err == nil {
+		t.Fatal("ValidateHints() expected error for empty on_select step")
+	}
+
+	// Unknown action rejected
+	cfg.Hints.OnSelect = config.StringOrStringArray{"not_an_action"}
+	err = cfg.ValidateHints(nil)
+	if err == nil {
+		t.Fatal("ValidateHints() expected error for unknown on_select action")
+	}
+}

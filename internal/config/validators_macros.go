@@ -223,15 +223,18 @@ func (c *Config) eachBindingAction(visit func(field, actionStr string) error) er
 		}
 	}
 
-	// The Mission Control hooks are action sequences like any binding — they
-	// are dispatched through the same executor when the transition fires, so a
-	// macro they name has to exist by the time it does.
+	// The Mission Control hooks and on_select settings are action sequences like
+	// any binding — they are dispatched through the same executor when triggered,
+	// so a macro they name has to exist by the time it does.
 	hooks := []struct {
 		steps []string
 		field string
 	}{
 		{field: "hints.on_mission_control_activated", steps: c.Hints.OnMissionControlActivated},
 		{field: "hints.on_mission_control_deactivated", steps: c.Hints.OnMissionControlDeactivated},
+		{field: "hints.on_select", steps: c.Hints.OnSelect},
+		{field: "grid.on_select", steps: c.Grid.OnSelect},
+		{field: "recursive_grid.on_select", steps: c.RecursiveGrid.OnSelect},
 	}
 
 	for _, hook := range hooks {

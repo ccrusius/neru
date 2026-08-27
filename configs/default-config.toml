@@ -86,6 +86,7 @@ detect_mission_control = false
 # because they have no default: an empty value here would claim one.
 # on_mission_control_activated = "idle"     # A single action, or an array of them
 # on_mission_control_deactivated = ["hints"]
+# on_select = ["scroll"]                    # Action(s) to run when a hint is selected without a CLI action
 clickable_roles = [
     ## Semantic role names. They resolve to each platform's native
     ## accessibility vocabulary, so this list works on macOS, Linux and Windows.
@@ -190,6 +191,7 @@ live_match_update = true                    # Highlight cells as you type
 hide_unmatched = true                       # Hide non-matching cells
 prewarm_enabled = true                      # Pre-compute grid on startup (~1.5MB RAM)
 enable_gc = false                           # Periodic memory cleanup (adds CPU overhead)
+# on_select = ["scroll"]                    # Action(s) to run when a grid selection completes without a CLI action
 
 [grid.hotkeys]
 "Escape" = "idle"
@@ -221,6 +223,7 @@ keys = "rtyfghvbn"                          # Cell selection keys (must be grid_
 min_size_width = 1                          # Stop subdividing below this width (px)
 min_size_height = 1                         # Stop subdividing below this height (px)
 max_depth = 10                              # Maximum recursion levels (1–20)
+# on_select = ["scroll"]                    # Action(s) to run when a recursive grid selection completes without a CLI action
 
 [recursive_grid.animation]
 enabled = true                              # Opt out from native depth transition animation on supported platforms
