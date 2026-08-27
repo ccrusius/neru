@@ -9,6 +9,7 @@ import (
 
 	"github.com/y3owk1n/neru/internal/app/components"
 	componentrecursivegrid "github.com/y3owk1n/neru/internal/app/components/recursivegrid"
+	scrollcomponent "github.com/y3owk1n/neru/internal/app/components/scroll"
 	"github.com/y3owk1n/neru/internal/app/services"
 	"github.com/y3owk1n/neru/internal/config"
 	"github.com/y3owk1n/neru/internal/domain"
@@ -336,5 +337,73 @@ func TestApplyRecursiveGridFlags_TellsAbsentOnExitFromEmptyOne(t *testing.T) {
 				t.Errorf("OnExit = %v, want %d step(s)", ctx.OnExit(), testCase.want)
 			}
 		})
+	}
+}
+
+func TestHandleRecursiveGridKey_OnSelectDispatchesAndExits(t *testing.T) {
+	moveCount := 0
+	gotSteps := make(chan []string, 1)
+
+	appState := state.NewAppState()
+	appState.SetMode(domain.ModeRecursiveGrid)
+
+	handler := newHandlerWithState(handlerState{
+		appState:    appState,
+		cursorState: state.NewCursorState(),
+		config: &config.Config{
+			RecursiveGrid: config.RecursiveGridConfig{
+				Enabled:       true,
+				GridCols:      2,
+				GridRows:      2,
+				Keys:          "uijk",
+				MinSizeWidth:  25,
+				MinSizeHeight: 25,
+				MaxDepth:      0,
+				Hotkeys:       map[string]config.StringOrStringArray{},
+				OnSelect:      config.StringOrStringArray{"scroll"},
+			},
+		},
+		logger: zap.NewNop(),
+		actionService: services.NewActionService(
+			&portmocks.MockAccessibilityPort{},
+			&portmocks.MockOverlayPort{},
+			&portmocks.MockSystemPort{
+				MoveCursorToPointFunc: func(_ context.Context, _ image.Point, _ bool) error {
+					moveCount++
+
+					return nil
+				},
+			},
+			zap.NewNop(),
+		),
+		recursiveGrid: &components.RecursiveGridComponent{
+			Context: &componentrecursivegrid.Context{},
+		},
+		scroll: &components.ScrollComponent{
+			Context: &scrollcomponent.Context{},
+		},
+		screenBounds: image.Rect(0, 0, 100, 100),
+		executeActionSequence: func(source string, steps []string) {
+			if source == "on-select" {
+				gotSteps <- steps
+			}
+		},
+		overlayPort: &portmocks.MockOverlayPort{},
+	})
+
+	handler.initializeRecursiveGridManager(image.Rect(0, 0, 100, 100))
+	handler.handleRecursiveGridKey("u")
+
+	if moveCount != 1 {
+		t.Fatalf("handleRecursiveGridKey() moved cursor %d times, want 1", moveCount)
+	}
+
+	// Single mode transition should immediately switch to scroll mode without exiting to idle
+	if appState.CurrentMode() != domain.ModeScroll {
+		t.Fatalf("expected mode to transition to scroll, got %v", appState.CurrentMode())
+	}
+
+	if !handler.scroll.Context.IsActive() {
+		t.Fatal("expected scroll context to be active")
 	}
 }

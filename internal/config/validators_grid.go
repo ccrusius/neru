@@ -94,6 +94,11 @@ func (c *Config) ValidateGrid(warnings *Warnings, written WrittenConfig) error {
 		return err
 	}
 
+	err = validateActionSteps("grid.on_select", c.Grid.OnSelect)
+	if err != nil {
+		return err
+	}
+
 	c.warnGridKeySets(warnings, written)
 
 	return nil
@@ -573,5 +578,5 @@ func (c *Config) ValidateRecursiveGrid() error {
 		return err
 	}
 
-	return nil
+	return validateActionSteps("recursive_grid.on_select", c.RecursiveGrid.OnSelect)
 }

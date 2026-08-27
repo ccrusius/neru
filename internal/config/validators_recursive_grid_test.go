@@ -109,3 +109,31 @@ func TestConfigValidateRecursiveGrid_InvalidAnimationDuration(t *testing.T) {
 		t.Fatal("ValidateRecursiveGrid() expected error for negative animation duration")
 	}
 }
+
+func TestConfigValidateRecursiveGrid_OnSelect(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.RecursiveGrid.Enabled = true
+	cfg.RecursiveGrid.GridCols = 3
+	cfg.RecursiveGrid.GridRows = 3
+	cfg.RecursiveGrid.Keys = "rtyfghvbn"
+	cfg.RecursiveGrid.OnSelect = config.StringOrStringArray{"scroll"}
+
+	err := cfg.ValidateRecursiveGrid()
+	if err != nil {
+		t.Fatalf("ValidateRecursiveGrid() expected valid on_select, got %v", err)
+	}
+
+	// Empty step rejected
+	cfg.RecursiveGrid.OnSelect = config.StringOrStringArray{""}
+	err = cfg.ValidateRecursiveGrid()
+	if err == nil {
+		t.Fatal("ValidateRecursiveGrid() expected error for empty on_select step")
+	}
+
+	// Unknown action rejected
+	cfg.RecursiveGrid.OnSelect = config.StringOrStringArray{"bogus_action"}
+	err = cfg.ValidateRecursiveGrid()
+	if err == nil {
+		t.Fatal("ValidateRecursiveGrid() expected error for unknown on_select action")
+	}
+}

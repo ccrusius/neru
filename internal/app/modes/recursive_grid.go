@@ -251,6 +251,16 @@ func (h *handlerState) handleRecursiveGridKey(key string) {
 		cursorFollowSelection := h.recursiveGrid.Context.CursorFollowSelection()
 		captureScope := h.recursiveGrid.Context.CaptureScope()
 
+		if pendingAction == nil && len(h.config.RecursiveGrid.OnSelect) > 0 {
+			moveCursorErr := h.actionService.MoveCursorToPoint(ctx, absoluteCenter)
+			if moveCursorErr != nil {
+				h.logger.Error("Failed to move cursor", zap.Error(moveCursorErr))
+			}
+			h.handleOnSelect(h.config.RecursiveGrid.OnSelect)
+
+			return
+		}
+
 		if pendingAction == nil && !repeat && !cursorFollowSelection {
 			h.refreshRecursiveGridVirtualPointer()
 

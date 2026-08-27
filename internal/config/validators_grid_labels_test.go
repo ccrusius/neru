@@ -454,3 +454,28 @@ func TestConfigValidateGrid_DisabledGridIsSilent(t *testing.T) {
 		t.Errorf("warnings = %q, want none for a disabled grid", got)
 	}
 }
+
+func TestConfigValidateGrid_OnSelect(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Grid.Enabled = true
+	cfg.Grid.OnSelect = config.StringOrStringArray{"scroll"}
+
+	err := cfg.ValidateGrid(nil, config.WrittenConfig{})
+	if err != nil {
+		t.Fatalf("ValidateGrid() expected valid on_select, got %v", err)
+	}
+
+	// Empty step rejected
+	cfg.Grid.OnSelect = config.StringOrStringArray{""}
+	err = cfg.ValidateGrid(nil, config.WrittenConfig{})
+	if err == nil {
+		t.Fatal("ValidateGrid() expected error for empty on_select step")
+	}
+
+	// Unknown action rejected
+	cfg.Grid.OnSelect = config.StringOrStringArray{"unknown_step"}
+	err = cfg.ValidateGrid(nil, config.WrittenConfig{})
+	if err == nil {
+		t.Fatal("ValidateGrid() expected error for unknown on_select action")
+	}
+}

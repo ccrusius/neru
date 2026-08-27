@@ -14,9 +14,15 @@ import (
 	"github.com/y3owk1n/neru/internal/app/components/grid"
 	"github.com/y3owk1n/neru/internal/app/components/hints"
 	"github.com/y3owk1n/neru/internal/app/components/recursivegrid"
+	scrollcomponent "github.com/y3owk1n/neru/internal/app/components/scroll"
+	"github.com/y3owk1n/neru/internal/app/services"
+	"github.com/y3owk1n/neru/internal/config"
 	"github.com/y3owk1n/neru/internal/domain"
+	"github.com/y3owk1n/neru/internal/domain/element"
+	domainHint "github.com/y3owk1n/neru/internal/domain/hint"
 	"github.com/y3owk1n/neru/internal/domain/modecmd"
 	"github.com/y3owk1n/neru/internal/domain/state"
+	portmocks "github.com/y3owk1n/neru/internal/ports/mocks"
 )
 
 func TestExecuteActionAtPoint_NilActionNoop(t *testing.T) {
@@ -69,6 +75,47 @@ func TestRunOnExit_NilAndEmptyNoop(t *testing.T) {
 	select {
 	case <-called:
 		t.Fatal("on-exit should not dispatch for nil or empty steps")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestRunOnSelect_DispatchesEveryStepInOrder(t *testing.T) {
+	got := make(chan []string, 1)
+	handler := newHandlerWithState(handlerState{
+		logger: zap.NewNop(),
+		executeActionSequence: func(_ string, steps []string) {
+			got <- steps
+		},
+	})
+
+	onSelect := []string{"scroll"}
+	handler.runOnSelect(domain.ModeHints, onSelect)
+
+	select {
+	case steps := <-got:
+		if !slices.Equal(steps, onSelect) {
+			t.Fatalf("on-select dispatched %v, want %v", steps, onSelect)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("on-select sequence was not dispatched")
+	}
+}
+
+func TestRunOnSelect_NilAndEmptyNoop(t *testing.T) {
+	called := make(chan struct{}, 1)
+	handler := newHandlerWithState(handlerState{
+		logger: zap.NewNop(),
+		executeActionSequence: func(_ string, _ []string) {
+			called <- struct{}{}
+		},
+	})
+
+	handler.runOnSelect(domain.ModeHints, nil)
+	handler.runOnSelect(domain.ModeHints, []string{})
+
+	select {
+	case <-called:
+		t.Fatal("on-select should not dispatch for nil or empty steps")
 	case <-time.After(100 * time.Millisecond):
 	}
 }
@@ -260,4 +307,133 @@ func TestCurrentModeOnExit(t *testing.T) {
 
 func point(x, y int) image.Point {
 	return image.Point{X: x, Y: y}
+}
+
+func TestHandleHintsModeKey_OnSelectDispatchesAndExits(t *testing.T) {
+	moveCount := 0
+	gotSteps := make(chan []string, 1)
+
+	logger := zap.NewNop()
+	manager := domainHint.NewManager(logger, nil)
+	router := domainHint.NewRouter(manager, logger)
+
+	elem, _ := element.NewElement("btn", image.Rect(10, 10, 30, 30), element.RoleButton)
+	h, _ := domainHint.NewHint("A", elem, image.Point{X: 20, Y: 20})
+	_ = manager.SetHints(domainHint.NewCollection([]*domainHint.Interface{h}))
+
+	hintsCtx := &hints.Context{}
+	hintsCtx.SetRouter(router)
+
+	appState := state.NewAppState()
+	appState.SetMode(domain.ModeHints)
+
+	handler := newHandlerWithState(handlerState{
+		appState:    appState,
+		cursorState: state.NewCursorState(),
+		config: &config.Config{
+			Hints: config.HintsConfig{
+				Enabled:  true,
+				OnSelect: config.StringOrStringArray{"scroll"},
+			},
+		},
+		logger: logger,
+		actionService: services.NewActionService(
+			&portmocks.MockAccessibilityPort{},
+			&portmocks.MockOverlayPort{},
+			&portmocks.MockSystemPort{
+				MoveCursorToPointFunc: func(_ context.Context, _ image.Point, _ bool) error {
+					moveCount++
+
+					return nil
+				},
+			},
+			logger,
+		),
+		hints: &components.HintsComponent{
+			Context: hintsCtx,
+		},
+		scroll: &components.ScrollComponent{
+			Context: &scrollcomponent.Context{},
+		},
+		executeActionSequence: func(source string, steps []string) {
+			if source == "on-select" {
+				gotSteps <- steps
+			}
+		},
+		overlayPort: &portmocks.MockOverlayPort{},
+	})
+
+	handler.handleHintsModeKey("a")
+
+	if moveCount != 1 {
+		t.Fatalf("handleHintsModeKey() moved cursor %d times, want 1", moveCount)
+	}
+
+	// Single mode transition should immediately switch to scroll mode without exiting to idle
+	if appState.CurrentMode() != domain.ModeScroll {
+		t.Fatalf("expected mode to transition to scroll, got %v", appState.CurrentMode())
+	}
+
+	if !handler.scroll.Context.IsActive() {
+		t.Fatal("expected scroll context to be active")
+	}
+}
+
+func TestHandleHintsModeKey_OnSelectSequenceDispatchesAsync(t *testing.T) {
+	appState := state.NewAppState()
+	appState.SetMode(domain.ModeHints)
+
+	cfg := config.DefaultConfig()
+	cfg.Hints.OnSelect = config.StringOrStringArray{"action custom", "idle"}
+
+	logger := zap.NewNop()
+	manager := domainHint.NewManager(logger, nil)
+	router := domainHint.NewRouter(manager, logger)
+
+	elem, _ := element.NewElement("btn", image.Rect(10, 10, 30, 30), element.RoleButton)
+	h, _ := domainHint.NewHint("A", elem, image.Point{X: 20, Y: 20})
+	_ = manager.SetHints(domainHint.NewCollection([]*domainHint.Interface{h}))
+
+	hintsCtx := &hints.Context{}
+	hintsCtx.SetRouter(router)
+
+	gotSteps := make(chan []string, 1)
+
+	handler := newHandlerWithState(handlerState{
+		appState:    appState,
+		cursorState: state.NewCursorState(),
+		config:      cfg,
+		logger:      logger,
+		actionService: services.NewActionService(
+			&portmocks.MockAccessibilityPort{},
+			&portmocks.MockOverlayPort{},
+			&portmocks.MockSystemPort{
+				MoveCursorToPointFunc: func(_ context.Context, _ image.Point, _ bool) error {
+					return nil
+				},
+			},
+			logger,
+		),
+		hints: &components.HintsComponent{
+			Context: hintsCtx,
+		},
+		executeActionSequence: func(source string, steps []string) {
+			if source == "on-select" {
+				gotSteps <- steps
+			}
+		},
+		overlayPort: &portmocks.MockOverlayPort{},
+	})
+
+	handler.handleHintsModeKey("a")
+
+	select {
+	case steps := <-gotSteps:
+		want := []string{"action custom", "idle"}
+		if !slices.Equal(steps, want) {
+			t.Fatalf("on-select dispatched %v, want %v", steps, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("on-select sequence was not dispatched")
+	}
 }

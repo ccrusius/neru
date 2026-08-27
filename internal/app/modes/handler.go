@@ -409,6 +409,12 @@ func (h *Handler) ActivateMode(activation modecmd.Activation) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	h.activateModeUnderLock(activation)
+}
+
+// activateModeUnderLock performs the mode activation when h.mu is already held
+// by the caller.
+func (h *handlerState) activateModeUnderLock(activation modecmd.Activation) {
 	mode := activation.Mode
 
 	// `neru stop` switches every mode off. The IPC controller refuses while
