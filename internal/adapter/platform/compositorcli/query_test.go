@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -305,5 +306,34 @@ func TestQueryContext_CarriesTheUnderlyingFailure(t *testing.T) {
 
 	if !errors.Is(err, exec.ErrNotFound) && !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Query() error = %v, want it to carry why the CLI could not be run", err)
+	}
+}
+
+// TestQueryContext_ResolvesExecutableFromFallbackPath verifies that a bare CLI name
+// is found in fallback profile directories (like ~/.nix-profile/bin) even when
+// PATH does not contain them.
+func TestQueryContext_ResolvesExecutableFromFallbackPath(t *testing.T) {
+	fakeHome := t.TempDir()
+	nixBin := filepath.Join(fakeHome, ".nix-profile", "bin")
+	if err := os.MkdirAll(nixBin, 0755); err != nil {
+		t.Fatalf("failed to create fake nix bin dir: %v", err)
+	}
+
+	cliPath := filepath.Join(nixBin, "fake-nix-cli")
+	srcCLI := fakeCLI(t, modeAnswers)
+	if err := os.Symlink(srcCLI, cliPath); err != nil {
+		t.Fatalf("failed to create symlink for fake CLI: %v", err)
+	}
+
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("PATH", "/usr/bin") // System path that does not contain the CLI
+
+	var answer answerPayload
+	err := compositorcli.QueryContext(context.Background(), &answer, "fake-nix-cli", "-j", "activewindow")
+	if err != nil {
+		t.Fatalf("QueryContext() failed to find CLI in fallback path: %v", err)
+	}
+	if answer.Width != 946 || answer.Height != 942 {
+		t.Errorf("got answer %+v, want width 946, height 942", answer)
 	}
 }

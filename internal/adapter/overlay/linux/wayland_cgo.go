@@ -68,6 +68,10 @@ func (o *wlrootsOverlay) Healthy() bool {
 	return o.alive()
 }
 
+func (o *wlrootsOverlay) NeedsRecovery() bool {
+	return o != nil && o.raw != nil && C.neru_wayland_overlay_healthy(o.raw) == 0
+}
+
 func (o *wlrootsOverlay) WindowPtr() unsafe.Pointer {
 	if o == nil {
 		return nil
@@ -83,8 +87,15 @@ func (o *wlrootsOverlay) Show() {
 	}
 }
 
-// Resize is a no-op: Wayland layer shells auto-resize with their output.
-func (o *wlrootsOverlay) Resize() {}
+// Resize configures overlay surfaces/buffers for the current output layout.
+// Called under Manager.renderMu.
+func (o *wlrootsOverlay) Resize() {
+	if o == nil || o.raw == nil {
+		return
+	}
+
+	C.neru_wayland_overlay_setup_buffers(o.raw)
+}
 
 func (o *wlrootsOverlay) Destroy() {
 	if o == nil || o.raw == nil {
@@ -92,7 +103,11 @@ func (o *wlrootsOverlay) Destroy() {
 	}
 
 	o.cancelAnimation()
-	close(o.stopCh)
+	select {
+	case <-o.stopCh:
+	default:
+		close(o.stopCh)
+	}
 	<-o.doneCh
 
 	C.neru_wayland_overlay_destroy(o.raw)
@@ -100,11 +115,11 @@ func (o *wlrootsOverlay) Destroy() {
 }
 
 // alive answers the overlaySurface question the shared delegates ask before
-// they draw: is the native handle still open. It is nil-receiver safe so
-// Healthy, which the manager may reach on a backend it never built, has one
-// implementation to defer to.
+// they draw: is the native handle still open and the Wayland display healthy.
+// It is nil-receiver safe so Healthy, which the manager may reach on a backend
+// it never built, has one implementation to defer to.
 func (o *wlrootsOverlay) alive() bool {
-	return o != nil && o.raw != nil
+	return o != nil && o.raw != nil && C.neru_wayland_overlay_healthy(o.raw) != 0
 }
 
 // startPoller launches the keyboard poller goroutine. Called once per overlay

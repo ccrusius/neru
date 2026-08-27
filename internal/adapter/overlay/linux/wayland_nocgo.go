@@ -31,7 +31,8 @@ func newWlrootsOverlay(logger *zap.Logger) *wlrootsOverlay {
 	return nil
 }
 
-func (o *wlrootsOverlay) Healthy() bool { return false }
+func (o *wlrootsOverlay) Healthy() bool       { return false }
+func (o *wlrootsOverlay) NeedsRecovery() bool { return false }
 func (o *wlrootsOverlay) WindowPtr() unsafe.Pointer {
 	return nil
 }

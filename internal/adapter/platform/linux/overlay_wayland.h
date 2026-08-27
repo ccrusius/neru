@@ -85,6 +85,7 @@ typedef struct {
 } NeruWaylandOverlay;
 
 NeruWaylandOverlay *neru_wayland_overlay_new(void);
+int neru_wayland_overlay_healthy(NeruWaylandOverlay *overlay);
 void neru_wayland_overlay_destroy(NeruWaylandOverlay *overlay);
 void neru_wayland_overlay_setup_buffers(NeruWaylandOverlay *overlay);
 void neru_wayland_overlay_show(NeruWaylandOverlay *overlay);
