@@ -59,6 +59,68 @@ func filterHintsForScreen(
 	return filtered
 }
 
+// screenBoundsForFocusedWindow resolves the screen bounds holding the focused window,
+// falling back to fallback if no window or screen matches.
+func screenBoundsForFocusedWindow(
+	ctx context.Context,
+	system ports.SystemPort,
+	fallback image.Rectangle,
+) image.Rectangle {
+	if system == nil {
+		return fallback
+	}
+
+	windowBounds, found, err := system.FocusedWindowBounds(ctx)
+	if err != nil || !found || windowBounds.Empty() {
+		return fallback
+	}
+
+	center := image.Point{
+		X: windowBounds.Min.X + windowBounds.Dx()/2,
+		Y: windowBounds.Min.Y + windowBounds.Dy()/2,
+	}
+
+	if center.In(fallback) {
+		return fallback
+	}
+
+	names, namesErr := system.ScreenNames(ctx)
+	if namesErr != nil || len(names) == 0 {
+		return fallback
+	}
+
+	for _, name := range names {
+		bounds, bFound, bErr := system.ScreenBoundsByName(ctx, name)
+		if bErr != nil || !bFound {
+			continue
+		}
+		if center.In(bounds) {
+			return bounds
+		}
+	}
+
+	return fallback
+}
+
+// resolveHintsScreenBounds determines the screen bounds for hints mode.
+// It prefers the screen containing the focused window so that multi-monitor
+// setups with keyboard focus switching work even when the mouse cursor is on
+// another monitor. If no focused window is found or the window does not match
+// any screen, it falls back to the screen containing the cursor.
+func (h *handlerState) resolveHintsScreenBounds(ctx context.Context) image.Rectangle {
+	var fallback image.Rectangle
+	if h.system != nil {
+		b, err := h.system.ScreenBounds(ctx)
+		if err == nil {
+			fallback = b
+		} else if !derrors.IsNotSupported(err) {
+			h.logger.Warn("Failed to get screen bounds for hints", zap.Error(err))
+		}
+	}
+
+	return screenBoundsForFocusedWindow(ctx, h.system, fallback)
+}
+
 // activateHintModeWithAction activates hint mode with optional action parameter.
 func (h *handlerState) activateHintModeWithAction(activation modecmd.Activation) {
 	h.activateHintModeInternal(activation)
@@ -128,18 +190,8 @@ func (h *handlerState) activateHintModeInternal(activation modecmd.Activation) {
 		return
 	}
 
-	// Always resize overlay to the active screen (where mouse is) before collecting elements.
-	// Otherwise the overlay lands on the display the mouse just left.
-	var activeScreenBounds image.Rectangle
-
-	if h.system != nil {
-		b, err := h.system.ScreenBounds(h.ctx)
-		if err == nil {
-			activeScreenBounds = b
-		} else if !derrors.IsNotSupported(err) {
-			h.logger.Warn("Failed to get screen bounds for hints", zap.Error(err))
-		}
-	}
+	// Resize overlay to the screen holding the focused window (or where mouse is).
+	activeScreenBounds := h.resolveHintsScreenBounds(h.ctx)
 
 	h.setScreenBounds(activeScreenBounds)
 	// On a fresh activation, take whatever frame is on screen off it (e.g.

@@ -167,14 +167,75 @@ func (capture *waylandEvdevCapture) handleNewDevice(name string) {
 		return
 	}
 
+	var deviceName [waylandEvdevDeviceNameSize]C.char
+	if C.neru_evdev_get_name(fd, &deviceName[0], waylandEvdevDeviceNameSize) <= 0 {
+		deviceName[0] = 0
+	}
+	devName := C.GoString(&deviceName[0])
+
+	if isNeruInjectionDevice(devName) {
+		_ = file.Close()
+
+		return
+	}
+
 	capture.deviceMu.Lock()
+	defer capture.deviceMu.Unlock()
+
+	// If we are already in virtual mode (e.g. Kanata), ignore newly attached physical keyboards
+	// because the remapper manages them. Grabbing them would cause the remapper to crash with EBUSY.
+	if capture.isVirtual {
+		if !isUinputVirtualDevice(fd, devName) {
+			_ = file.Close()
+
+			return
+		}
+
+		// A new virtual device appeared (e.g. Kanata restarted). Replace the tracked virtual device.
+		for _, f := range capture.files {
+			_ = f.Close()
+		}
+
+		if capture.grabbed && C.neru_evdev_grab(C.int(file.Fd()), 1) != 0 {
+			_ = file.Close()
+			capture.files = nil
+
+			return
+		}
+
+		capture.files = []*os.File{file}
+		capture.startReader(file)
+
+		return
+	}
+
+	// If we were in physical mode, but a virtual keyboard remapper just appeared:
+	if isUinputVirtualDevice(fd, devName) {
+		capture.isVirtual = true
+		for _, f := range capture.files {
+			if capture.grabbed {
+				C.neru_evdev_grab(C.int(f.Fd()), 0)
+			}
+			_ = f.Close()
+		}
+
+		if capture.grabbed && C.neru_evdev_grab(C.int(file.Fd()), 1) != 0 {
+			_ = file.Close()
+			capture.files = nil
+
+			return
+		}
+
+		capture.files = []*os.File{file}
+		capture.startReader(file)
+
+		return
+	}
 
 	// Avoid duplicates: the device might already be tracked if the inotify
-	// event fired for a device that was open at initial scan time (unlikely
-	// but possible on some kernels).
+	// event fired for a device that was open at initial scan time.
 	for _, f := range capture.files {
 		if f.Name() == path {
-			capture.deviceMu.Unlock()
 			_ = file.Close()
 
 			return
@@ -184,15 +245,12 @@ func (capture *waylandEvdevCapture) handleNewDevice(name string) {
 	// If the capture is currently grabbed, grab the new device under the
 	// same lock so Disable cannot race ahead and ungrab before we finish.
 	if capture.grabbed && C.neru_evdev_grab(C.int(file.Fd()), 1) != 0 {
-		capture.deviceMu.Unlock()
 		_ = file.Close()
 
 		return
 	}
 
 	capture.files = append(capture.files, file)
-	capture.deviceMu.Unlock()
-
 	capture.startReader(file)
 
 	if capture.logger != nil {

@@ -41,6 +41,8 @@ func (h *Handler) DebugProbeHints(
 		return "", boundsErr
 	}
 
+	screenBounds = screenBoundsForFocusedWindow(ctx, h.system, screenBounds)
+
 	generated, genErr := h.hintService.GenerateHints(
 		ctx,
 		filterRoles,

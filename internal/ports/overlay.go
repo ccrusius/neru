@@ -473,3 +473,10 @@ type OverlayCapabilityReporter interface {
 	// OverlayCapabilities reports whether this manager can currently render.
 	OverlayCapabilities() FeatureCapability
 }
+
+// OverlayReinitializer is an optional OverlayPort extension for managers that
+// support explicitly tearing down and re-creating their display connections and
+// surfaces (e.g. after system resume from sleep).
+type OverlayReinitializer interface {
+	Reinitialize(ctx context.Context) error
+}

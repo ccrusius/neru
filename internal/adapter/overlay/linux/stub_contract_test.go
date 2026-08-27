@@ -302,3 +302,43 @@ func TestLinuxOverlayManager_HidingTheVirtualPointerTakesNoRenderLock(t *testing
 		t.Fatal("HideIndicator blocked on renderMu while hiding the virtual pointer")
 	}
 }
+
+func TestLinuxOverlayManager_RecoveryAndReinitialization(t *testing.T) {
+	t.Parallel()
+
+	var nilOverlay *wlrootsOverlay
+	if nilOverlay.NeedsRecovery() {
+		t.Error("nilOverlay.NeedsRecovery() should be false")
+	}
+
+	closedOverlay := &wlrootsOverlay{}
+	if closedOverlay.NeedsRecovery() {
+		t.Error("closedOverlay.NeedsRecovery() should be false")
+	}
+	if closedOverlay.Healthy() {
+		t.Error("closedOverlay.Healthy() should be false")
+	}
+
+	// Non-Wayland backend should no-op on Reinitialize
+	x11Mgr := &Manager{backend: linuxOverlayBackendX11}
+	x11Mgr.Reinitialize()
+	if x11Mgr.wlroots != nil {
+		t.Error("x11Mgr.wlroots should be nil after Reinitialize")
+	}
+
+	// Destroyed manager should no-op on Reinitialize
+	destroyedMgr := &Manager{
+		backend:   linuxOverlayBackendWaylandWlroots,
+		destroyed: true,
+	}
+	destroyedMgr.Reinitialize()
+	if !destroyedMgr.Headless() {
+		t.Error("destroyedMgr should remain Headless after Reinitialize")
+	}
+
+	// Verify Manager implements Reinitialize()
+	mgr := &Manager{}
+	if _, ok := any(mgr).(interface{ Reinitialize() }); !ok {
+		t.Error("Manager should implement Reinitialize()")
+	}
+}

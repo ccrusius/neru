@@ -27,11 +27,9 @@ func (h *handlerState) refreshHintsForScreenChange(ctx context.Context) bool {
 	// Re-read screen bounds under the lock so the onUpdate callback
 	// uses coordinates that match the resized overlay.
 	if h.system != nil {
-		b, err := h.system.ScreenBounds(ctx)
-		if err == nil {
+		b := h.resolveHintsScreenBounds(ctx)
+		if !b.Empty() {
 			h.setScreenBounds(b)
-		} else if !derrors.IsNotSupported(err) {
-			h.logger.Warn("Failed to refresh screen bounds after screen change", zap.Error(err))
 		}
 	}
 

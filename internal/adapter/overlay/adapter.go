@@ -62,6 +62,9 @@ type Adapter struct {
 	monitorSelectDrawn atomic.Bool
 }
 
+var _ ports.OverlayPort = (*Adapter)(nil)
+var _ ports.OverlayReinitializer = (*Adapter)(nil)
+
 // NewAdapter creates a new overlay adapter. styles is the resolved Style the
 // adapter draws with; it is never rebuilt here, so a draw costs no theme
 // lookup.
@@ -491,6 +494,28 @@ func (a *Adapter) Refresh(ctx context.Context) error {
 	a.logger.Debug("Refreshing overlay")
 	a.manager.ResizeToActiveScreen()
 	a.logger.Debug("Overlay refreshed")
+
+	return nil
+}
+
+// Reinitialize tears down and re-creates overlay surfaces/connections if the
+// underlying manager supports it.
+func (a *Adapter) Reinitialize(ctx context.Context) error {
+	if a.releasedReporting("Reinitialize") {
+		return nil
+	}
+
+	err := contextAlive(ctx)
+	if err != nil {
+		return err
+	}
+
+	if reinit, ok := a.manager.(interface{ Reinitialize() }); ok {
+		a.logger.Info("Reinitializing overlay manager")
+		reinit.Reinitialize()
+	} else {
+		a.manager.ResizeToActiveScreen()
+	}
 
 	return nil
 }

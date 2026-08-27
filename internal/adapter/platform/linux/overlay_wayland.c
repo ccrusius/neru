@@ -79,8 +79,20 @@ static void neru_layer_surface_configure(
 	overlay->configured = 1;
 }
 
+static void neru_overlay_release_layer_surface(NeruWaylandOverlayScreen *scr);
+static void neru_overlay_release_screen(NeruWaylandOverlayScreen *scr);
+
 static void neru_layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface) {
-	// No-op
+	NeruWaylandOverlay *overlay = (NeruWaylandOverlay *)data;
+	if (!overlay)
+		return;
+
+	for (int i = 0; i < overlay->nr_screens; i++) {
+		if (overlay->screens[i].layer_surface == layer_surface) {
+			neru_overlay_release_layer_surface(&overlay->screens[i]);
+			break;
+		}
+	}
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
@@ -149,14 +161,7 @@ static const struct zxdg_output_v1_listener xdg_output_listener = {
     .description = neru_xdg_output_description,
 };
 
-// neru_overlay_release_screen frees every wayland/cairo/shm resource for one
-// output and leaves the slot inert (all pointers NULL, num_buffers 0). Used on
-// runtime output removal. The slot is tombstoned rather than compacted out of
-// the array because the xdg_output / wl_output / fractional_scale / wl_buffer
-// listeners all carry this slot's *address* as user_data; shifting slots would
-// dangle them. Every draw/buffer loop skips inert slots (wl_output/cr NULL), and
-// a later hotplug-add reuses the slot.
-static void neru_overlay_release_screen(NeruWaylandOverlayScreen *scr) {
+static void neru_overlay_release_layer_surface(NeruWaylandOverlayScreen *scr) {
 	for (int b = 0; b < scr->num_buffers; b++) {
 		if (scr->crs[b])
 			cairo_destroy(scr->crs[b]);
@@ -180,9 +185,6 @@ static void neru_overlay_release_screen(NeruWaylandOverlayScreen *scr) {
 	scr->shm_data = NULL;
 	scr->shm_size = 0;
 	scr->current_buffer = -1;
-	scr->width = 0;
-	scr->height = 0;
-	scr->fractional_scale_120 = 0;
 	if (scr->viewport) {
 		wp_viewport_destroy(scr->viewport);
 		scr->viewport = NULL;
@@ -199,6 +201,17 @@ static void neru_overlay_release_screen(NeruWaylandOverlayScreen *scr) {
 		wl_surface_destroy(scr->wl_surface);
 		scr->wl_surface = NULL;
 	}
+}
+
+// neru_overlay_release_screen frees every wayland/cairo/shm resource for one
+// output and leaves the slot inert (all pointers NULL, num_buffers 0). Used on
+// runtime output removal. The slot is tombstoned rather than compacted out of
+// the array because the xdg_output / wl_output / fractional_scale / wl_buffer
+// listeners all carry this slot's *address* as user_data; shifting slots would
+// dangle them. Every draw/buffer loop skips inert slots (wl_output/cr NULL), and
+// a later hotplug-add reuses the slot.
+static void neru_overlay_release_screen(NeruWaylandOverlayScreen *scr) {
+	neru_overlay_release_layer_surface(scr);
 	if (scr->xdg_output) {
 		zxdg_output_v1_destroy(scr->xdg_output);
 		scr->xdg_output = NULL;
@@ -207,6 +220,9 @@ static void neru_overlay_release_screen(NeruWaylandOverlayScreen *scr) {
 		wl_output_destroy(scr->wl_output);
 		scr->wl_output = NULL;
 	}
+	scr->width = 0;
+	scr->height = 0;
+	scr->fractional_scale_120 = 0;
 	scr->registry_name = 0;
 }
 
@@ -515,35 +531,29 @@ NeruWaylandOverlay *neru_wayland_overlay_new(void) {
 	return overlay;
 }
 
+int neru_wayland_overlay_healthy(NeruWaylandOverlay *overlay) {
+	if (!overlay || !overlay->display)
+		return 0;
+
+	return wl_display_get_error(overlay->display) == 0;
+}
+
 void neru_wayland_overlay_destroy(NeruWaylandOverlay *overlay) {
 	if (!overlay)
 		return;
 
 	for (int i = 0; i < overlay->nr_screens; i++) {
-		NeruWaylandOverlayScreen *scr = &overlay->screens[i];
-		for (int b = 0; b < scr->num_buffers; b++) {
-			if (scr->crs[b])
-				cairo_destroy(scr->crs[b]);
-			if (scr->cairo_surfaces[b])
-				cairo_surface_destroy(scr->cairo_surfaces[b]);
-			if (scr->buffers[b])
-				wl_buffer_destroy(scr->buffers[b]);
-			if (scr->shm_datas[b])
-				munmap(scr->shm_datas[b], scr->shm_sizes[b]);
-		}
-		scr->num_buffers = 0;
-		if (scr->viewport)
-			wp_viewport_destroy(scr->viewport);
-		if (scr->fractional_scale)
-			wp_fractional_scale_v1_destroy(scr->fractional_scale);
-		if (scr->layer_surface)
-			zwlr_layer_surface_v1_destroy(scr->layer_surface);
-		if (scr->wl_surface)
-			wl_surface_destroy(scr->wl_surface);
-		if (scr->xdg_output)
-			zxdg_output_v1_destroy(scr->xdg_output);
+		neru_overlay_release_screen(&overlay->screens[i]);
 	}
 
+	if (overlay->wl_keyboard) {
+		wl_keyboard_destroy(overlay->wl_keyboard);
+		overlay->wl_keyboard = NULL;
+	}
+	if (overlay->wl_seat) {
+		wl_seat_destroy(overlay->wl_seat);
+		overlay->wl_seat = NULL;
+	}
 	if (overlay->xkb_state)
 		xkb_state_unref(overlay->xkb_state);
 	if (overlay->xkb_ctx)
@@ -1139,7 +1149,8 @@ void neru_wayland_overlay_text(
 		cairo_text_extents(cr, text, &extents);
 		neru_wayland_overlay_color(cr, color);
 		cairo_move_to(
-		    cr, scr_x - (extents.width / 2.0) - extents.x_bearing, scr_y - (extents.height / 2.0) - extents.y_bearing);
+		    cr, round(scr_x - (extents.width / 2.0) - extents.x_bearing),
+		    round(scr_y - (extents.height / 2.0) - extents.y_bearing));
 		cairo_show_text(cr, text);
 		cairo_restore(cr);
 	}

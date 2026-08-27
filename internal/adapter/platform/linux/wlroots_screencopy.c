@@ -39,6 +39,7 @@ typedef struct {
 	int h;
 	int has_position;
 	int has_size;
+	int transform;
 } NeruScreencopyOutput;
 
 typedef struct {
@@ -58,6 +59,7 @@ typedef struct {
 	uint32_t stride;
 	int has_buffer;
 	int y_invert;
+	int transform;
 	int ready;
 	int failed;
 } NeruScreencopyCtx;
@@ -89,7 +91,6 @@ static void neru_screencopy_xdg_string(void *data, struct zxdg_output_v1 *xdg_ou
 static void neru_screencopy_output_geometry(
     void *data, struct wl_output *output, int32_t x, int32_t y, int32_t physical_width, int32_t physical_height,
     int32_t subpixel, const char *make, const char *model, int32_t transform) {
-	(void)data;
 	(void)output;
 	(void)x;
 	(void)y;
@@ -98,7 +99,9 @@ static void neru_screencopy_output_geometry(
 	(void)subpixel;
 	(void)make;
 	(void)model;
-	(void)transform;
+
+	NeruScreencopyOutput *out = (NeruScreencopyOutput *)data;
+	out->transform = (int)transform;
 }
 
 static void neru_screencopy_output_mode(
@@ -383,6 +386,90 @@ static NeruScreencopyOutput *neru_screencopy_select_output(
 	return NULL;
 }
 
+// neru_screencopy_apply_transform reorients the captured pixel buffer according
+// to the output's Wayland transform so the returned image matches logical coordinates.
+static int neru_screencopy_apply_transform(
+    int transform, const unsigned char *src, int src_w, int src_h, unsigned char **out_pixels, int *out_w,
+    int *out_h) {
+	if (transform == WL_OUTPUT_TRANSFORM_NORMAL) {
+		*out_pixels = (unsigned char *)src;
+		*out_w = src_w;
+		*out_h = src_h;
+
+		return NERU_CAPTURE_OK;
+	}
+
+	int dst_w = src_w;
+	int dst_h = src_h;
+
+	if (transform == WL_OUTPUT_TRANSFORM_90 || transform == WL_OUTPUT_TRANSFORM_270 ||
+	    transform == WL_OUTPUT_TRANSFORM_FLIPPED_90 || transform == WL_OUTPUT_TRANSFORM_FLIPPED_270) {
+		dst_w = src_h;
+		dst_h = src_w;
+	}
+
+	unsigned char *dst = malloc((size_t)dst_w * (size_t)dst_h * 4u);
+	if (!dst) {
+		return NERU_CAPTURE_ERR_ALLOC;
+	}
+
+	for (int dy = 0; dy < dst_h; dy++) {
+		for (int dx = 0; dx < dst_w; dx++) {
+			int sx;
+			int sy;
+
+			switch (transform) {
+			case WL_OUTPUT_TRANSFORM_90:
+				sx = dy;
+				sy = src_h - 1 - dx;
+				break;
+			case WL_OUTPUT_TRANSFORM_180:
+				sx = src_w - 1 - dx;
+				sy = src_h - 1 - dy;
+				break;
+			case WL_OUTPUT_TRANSFORM_270:
+				sx = src_w - 1 - dy;
+				sy = dx;
+				break;
+			case WL_OUTPUT_TRANSFORM_FLIPPED:
+				sx = src_w - 1 - dx;
+				sy = dy;
+				break;
+			case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+				sx = dy;
+				sy = dx;
+				break;
+			case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+				sx = dx;
+				sy = src_h - 1 - dy;
+				break;
+			case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+				sx = src_w - 1 - dy;
+				sy = src_h - 1 - dx;
+				break;
+			default:
+				sx = dx;
+				sy = dy;
+				break;
+			}
+
+			const unsigned char *sp = src + ((size_t)sy * (size_t)src_w + (size_t)sx) * 4u;
+			unsigned char *dp = dst + ((size_t)dy * (size_t)dst_w + (size_t)dx) * 4u;
+
+			dp[0] = sp[0];
+			dp[1] = sp[1];
+			dp[2] = sp[2];
+			dp[3] = sp[3];
+		}
+	}
+
+	*out_pixels = dst;
+	*out_w = dst_w;
+	*out_h = dst_h;
+
+	return NERU_CAPTURE_OK;
+}
+
 // neru_screencopy_convert turns the mapped shm buffer into packed RGBA8888.
 static int neru_screencopy_convert(const NeruScreencopyCtx *ctx, const unsigned char *src, NeruCapture *out) {
 	int red_offset;
@@ -428,6 +515,21 @@ static int neru_screencopy_convert(const NeruScreencopyCtx *ctx, const unsigned 
 			dst += 4;
 			line += 4;
 		}
+	}
+
+	if (ctx->transform != WL_OUTPUT_TRANSFORM_NORMAL) {
+		unsigned char *rotated = NULL;
+		int rot_w = 0;
+		int rot_h = 0;
+		int rot_status = neru_screencopy_apply_transform(
+		    ctx->transform, pixels, width, height, &rotated, &rot_w, &rot_h);
+		free(pixels);
+		if (rot_status != NERU_CAPTURE_OK) {
+			return rot_status;
+		}
+		pixels = rotated;
+		width = rot_w;
+		height = rot_h;
 	}
 
 	out->pixels = pixels;
@@ -596,6 +698,8 @@ int neru_screencopy_capture_region(int x, int y, int w, int h, int timeout_ms, N
 
 		return NERU_CAPTURE_ERR_NO_OUTPUT;
 	}
+
+	ctx.transform = target->transform;
 
 	struct zwlr_screencopy_frame_v1 *frame =
 	    zwlr_screencopy_manager_v1_capture_output_region(ctx.screencopy_mgr, 0, target->output, local_x, local_y, w, h);

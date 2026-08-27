@@ -103,6 +103,10 @@ type Manager struct {
 	// the badge is painted onto the one shared surface rather than into a
 	// window of its own, so taking it off means knowing what it covered.
 	searchBadgeRect image.Rectangle
+
+	initMu       sync.Mutex
+	destroyed    bool
+	activeOrigin image.Point
 }
 
 var (
@@ -166,6 +170,8 @@ func (m *Manager) WaylandKeyboardChannel() <-chan string {
 
 // Show displays the overlay.
 func (m *Manager) Show() {
+	m.ensureOverlay()
+
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
 
@@ -240,6 +246,8 @@ func scaleBadgeFont(style overlayBadgeStyle, scale float64) overlayBadgeStyle {
 
 // ResizeToActiveScreen resizes the overlay to the active screen.
 func (m *Manager) ResizeToActiveScreen() {
+	m.ensureOverlay()
+
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
 
@@ -261,12 +269,75 @@ func (m *Manager) SetActiveScreenOrigin(origin image.Point) {
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
 
+	m.activeOrigin = origin
+
 	if m.x11 != nil {
 		m.x11.setOriginOffset(origin)
 	}
 
 	if m.wlroots != nil {
 		m.wlroots.setOriginOffset(origin)
+	}
+}
+
+// Reinitialize tears down the current Wayland overlay connection and establishes
+// a fresh one. Used on wake from sleep and auto-recovery.
+func (m *Manager) Reinitialize() {
+	m.reinitialize(true)
+}
+
+func (m *Manager) ensureOverlay() {
+	m.reinitialize(false)
+}
+
+func (m *Manager) reinitialize(force bool) {
+	if m == nil || m.backend != linuxOverlayBackendWaylandWlroots {
+		return
+	}
+
+	m.initMu.Lock()
+	defer m.initMu.Unlock()
+
+	m.renderMu.Lock()
+	if m.destroyed {
+		m.renderMu.Unlock()
+		return
+	}
+	if !force && (m.wlroots == nil || !m.wlroots.NeedsRecovery()) {
+		m.renderMu.Unlock()
+		return
+	}
+	old := m.wlroots
+	m.wlroots = nil
+	m.renderMu.Unlock()
+
+	if old != nil {
+		old.Destroy()
+	}
+
+	newOverlay := newWlrootsOverlay(m.logger)
+	if newOverlay == nil {
+		if m.logger != nil {
+			m.logger.Warn("failed to reinitialize wlroots overlay")
+		}
+		return
+	}
+
+	m.renderMu.Lock()
+	if m.destroyed {
+		m.renderMu.Unlock()
+		newOverlay.Destroy()
+		return
+	}
+	newOverlay.setRenderMu(&m.renderMu)
+	newOverlay.setKeyboardCaptureEnabled(m.keyboardCaptureEnabled)
+	newOverlay.setOriginOffset(m.activeOrigin)
+	newOverlay.startPoller()
+	m.wlroots = newOverlay
+	m.renderMu.Unlock()
+
+	if m.logger != nil {
+		m.logger.Info("reinitialized wlroots overlay backend")
 	}
 }
 
@@ -278,6 +349,7 @@ func (m *Manager) Destroy() {
 	// goroutine acquires renderMu on every iteration.
 	// Holding renderMu while waiting on the poller would deadlock.
 	m.renderMu.Lock()
+	m.destroyed = true
 	x11 := m.x11
 	wlroots := m.wlroots
 	m.x11 = nil
@@ -373,6 +445,7 @@ func (m *Manager) OverlayCapabilities() ports.FeatureCapability {
 			Detail: "X11 overlay backend failed to initialize",
 		}
 	case linuxOverlayBackendWaylandWlroots:
+		m.ensureOverlay()
 		if m.wlroots != nil && m.wlroots.Healthy() {
 			return ports.FeatureCapability{
 				Status: ports.FeatureStatusSupported,
@@ -405,6 +478,8 @@ func (m *Manager) OverlayCapabilities() ports.FeatureCapability {
 // leave the user looking at labels in a placement they did not choose, with
 // nothing anywhere saying so.
 func (m *Manager) DrawHintsWithStyle(hintsSlice []*hints.Hint, style hints.StyleMode) error {
+	m.ensureOverlay()
+
 	// Canceling first keeps the refusal below from leaving an animation
 	// painting the surface this draw was about to replace, and the same call
 	// answers whether there is a backend to draw on — so this refusal reads
@@ -478,6 +553,8 @@ func (m *Manager) DrawHintSearchInput(
 	frame hints.SearchInputFrame,
 	style hints.SearchInputStyle,
 ) error {
+	m.ensureOverlay()
+
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
 
@@ -563,6 +640,8 @@ func (m *Manager) DrawModeIndicator(posX, posY int) {
 		return
 	}
 
+	m.ensureOverlay()
+
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
 
@@ -584,6 +663,8 @@ func (m *Manager) DrawStickyModifiersIndicator(posX, posY int, symbols string) {
 	if m.StickyModifiersOverlay() == nil {
 		return
 	}
+
+	m.ensureOverlay()
 
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
@@ -615,6 +696,8 @@ func (m *Manager) DrawStickyModifiersIndicator(posX, posY int, symbols string) {
 
 // DrawGrid draws the grid overlay.
 func (m *Manager) DrawGrid(grid *domainGrid.Grid, input string, style grid.Style) error {
+	m.ensureOverlay()
+
 	m.renderMu.Lock()
 	defer m.renderMu.Unlock()
 
@@ -646,6 +729,8 @@ func (m *Manager) DrawRecursiveGrid(
 	style recursivegrid.Style,
 	virtualPointer recursivegrid.VirtualPointerState,
 ) error {
+	m.ensureOverlay()
+
 	m.cancelBackendAnimation()
 
 	m.renderMu.Lock()
@@ -789,6 +874,8 @@ func (m *Manager) ShowSubgrid(
 	style grid.Style,
 	virtualPointer recursivegrid.VirtualPointerState,
 ) {
+	m.ensureOverlay()
+
 	if !m.cancelBackendAnimation() {
 		return
 	}
@@ -1007,6 +1094,8 @@ func (m *Manager) DrawMonitorSelect(
 	targets []manager.MonitorSelectTarget,
 	style manager.MonitorSelectStyle,
 ) error {
+	m.ensureOverlay()
+
 	m.cancelBackendAnimation()
 
 	m.renderMu.Lock()
@@ -1094,7 +1183,13 @@ func (m *Manager) DrawMouseActionIndicator(
 			m.x11Indicator.DrawMouseActionIndicator(point, style)
 		}
 	case linuxOverlayBackendWaylandWlroots:
-		if m.wlrootsIndicator == nil {
+		if m.wlrootsIndicator == nil || !m.wlrootsIndicator.Healthy() {
+			if m.wlrootsIndicator != nil {
+				old := m.wlrootsIndicator
+				m.wlrootsIndicator = nil
+				old.Destroy()
+			}
+
 			m.wlrootsIndicator = newWlrootsOverlay(m.logger)
 			if m.wlrootsIndicator != nil {
 				// The indicator surface shares the dedicated render lock and

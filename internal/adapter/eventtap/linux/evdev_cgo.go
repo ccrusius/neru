@@ -264,9 +264,10 @@ func (state *waylandEvdevKeyState) trackModifier(
 }
 
 type waylandEvdevCapture struct {
-	files  []*os.File
-	events chan waylandEvdevEvent
-	logger *zap.Logger
+	files     []*os.File
+	events    chan waylandEvdevEvent
+	logger    *zap.Logger
+	isVirtual bool
 
 	closeOnce        sync.Once
 	done             sync.WaitGroup

@@ -4,12 +4,67 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/y3owk1n/neru/internal/derrors"
 )
+
+func isIsolatedPath(currentPath string) bool {
+	if currentPath == "" {
+		return false
+	}
+	return !strings.Contains(currentPath, "/usr/bin") && !strings.Contains(currentPath, "/bin")
+}
+
+// fallbackBinDirs returns standard user and system binary directories that may
+// be absent from minimal environments (such as systemd user services).
+func fallbackBinDirs() []string {
+	if isIsolatedPath(os.Getenv("PATH")) {
+		return nil
+	}
+	var dirs []string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dirs = append(dirs,
+			filepath.Join(home, ".nix-profile", "bin"),
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+		)
+	}
+	if user := os.Getenv("USER"); user != "" {
+		dirs = append(dirs,
+			filepath.Join("/etc/profiles/per-user", user, "bin"),
+			filepath.Join("/nix/var/nix/profiles/per-user", user, "bin"),
+		)
+	}
+	dirs = append(dirs,
+		"/run/current-system/sw/bin",
+		"/nix/var/nix/profiles/default/bin",
+		"/usr/local/bin",
+	)
+	return dirs
+}
+
+// resolveExecutable finds the full path to name if it is a bare command name
+// and not found in PATH, checking standard Nix, Home Manager, and user locations.
+func resolveExecutable(name string) string {
+	if strings.ContainsRune(name, filepath.Separator) {
+		return name
+	}
+	if _, err := exec.LookPath(name); err == nil {
+		return name
+	}
+	for _, dir := range fallbackBinDirs() {
+		candidate := filepath.Join(dir, name)
+		if resolved, err := exec.LookPath(candidate); err == nil {
+			return resolved
+		}
+	}
+	return name
+}
 
 // QueryTimeout bounds a query whose caller brought no deadline of its own.
 // Every one of these runs on a path that can be holding the mode handler's
@@ -45,7 +100,8 @@ func Query(dst any, name string, args ...string) error {
 // already carry a deadline. The deadline is real: CommandContext kills the CLI
 // when it expires and pipeGuard keeps the read from waiting past the kill.
 func QueryContext(ctx context.Context, dst any, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	binPath := resolveExecutable(name)
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.WaitDelay = pipeGuard
 
 	out, err := cmd.Output()

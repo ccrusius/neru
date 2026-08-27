@@ -104,6 +104,14 @@ func readWlrootsScreens(client *C.NeruWlrootsClient) []wlrootsScreen {
 	return screens
 }
 
+func wlrootsLiveScreensLocked() []wlrootsScreen {
+	if globalWlrootsState.client != nil {
+		globalWlrootsState.screens = readWlrootsScreens(globalWlrootsState.client)
+	}
+
+	return globalWlrootsState.screens
+}
+
 // wlrootsRefreshScreens re-reads the output list from the C client into the Go
 // cache after a display-configuration change (hotplug). ScreenBounds and friends
 // read globalWlrootsState.screens, so this must run before the app re-queries
@@ -117,11 +125,7 @@ func wlrootsRefreshScreens() {
 	globalWlrootsState.mu.Lock()
 	defer globalWlrootsState.mu.Unlock()
 
-	if globalWlrootsState.client == nil {
-		return
-	}
-
-	globalWlrootsState.screens = readWlrootsScreens(globalWlrootsState.client)
+	wlrootsLiveScreensLocked()
 }
 
 // wlrootsScreenEventFD returns a readable file descriptor that becomes ready
@@ -361,19 +365,21 @@ func wlrootsScreenBounds() (image.Rectangle, error) {
 		return image.Rectangle{}, err
 	}
 
-	globalWlrootsState.mu.RLock()
-	defer globalWlrootsState.mu.RUnlock()
+	globalWlrootsState.mu.Lock()
+	defer globalWlrootsState.mu.Unlock()
+
+	screens := wlrootsLiveScreensLocked()
 
 	// Return bounds of the screen containing the cursor.
 	cursor, _ := wlrootsCursorPositionLocked()
-	for _, screen := range globalWlrootsState.screens {
+	for _, screen := range screens {
 		if cursor.In(screen.Bounds) {
 			return screen.Bounds, nil
 		}
 	}
 
 	// Fallback to first screen.
-	return globalWlrootsState.screens[0].Bounds, nil
+	return screens[0].Bounds, nil
 }
 
 func wlrootsScreenBoundsByName(name string) (image.Rectangle, bool, error) {
@@ -386,10 +392,12 @@ func wlrootsScreenBoundsByName(name string) (image.Rectangle, bool, error) {
 		return image.Rectangle{}, false, err
 	}
 
-	globalWlrootsState.mu.RLock()
-	defer globalWlrootsState.mu.RUnlock()
+	globalWlrootsState.mu.Lock()
+	defer globalWlrootsState.mu.Unlock()
 
-	for _, screen := range globalWlrootsState.screens {
+	screens := wlrootsLiveScreensLocked()
+
+	for _, screen := range screens {
 		if strings.EqualFold(screen.Name, name) {
 			return screen.Bounds, true, nil
 		}
@@ -404,11 +412,13 @@ func wlrootsScreenNames() ([]string, error) {
 		return nil, err
 	}
 
-	globalWlrootsState.mu.RLock()
-	defer globalWlrootsState.mu.RUnlock()
+	globalWlrootsState.mu.Lock()
+	defer globalWlrootsState.mu.Unlock()
 
-	names := make([]string, 0, len(globalWlrootsState.screens))
-	for _, screen := range globalWlrootsState.screens {
+	screens := wlrootsLiveScreensLocked()
+
+	names := make([]string, 0, len(screens))
+	for _, screen := range screens {
 		names = append(names, screen.Name)
 	}
 

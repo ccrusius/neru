@@ -12,6 +12,9 @@ import (
 	"github.com/y3owk1n/neru/internal/ports"
 )
 
+var _ ports.OverlayPort = (*MockOverlayPort)(nil)
+var _ ports.OverlayReinitializer = (*MockOverlayPort)(nil)
+
 // MockOverlayPort is a mock implementation of ports.OverlayPort.
 type MockOverlayPort struct {
 	modeIndicatorMu sync.Mutex
@@ -57,7 +60,8 @@ type MockOverlayPort struct {
 	FlushFunc     func()
 	IsVisibleFunc func() bool
 	RefreshFunc   func(context.Context) error
-	HealthFunc    func(context.Context) error
+	HealthFunc       func(context.Context) error
+	ReinitializeFunc func(context.Context) error
 
 	frameMu sync.Mutex
 	// frames records every Frame the caller handed over, in order, so a test
@@ -95,6 +99,7 @@ type MockOverlayPort struct {
 	screenShareHide bool
 	keyboardCapture bool
 	destroys        int
+	reinitializes   int
 
 	// State tracking for tests
 	visible bool
@@ -529,6 +534,27 @@ func (m *MockOverlayPort) Health(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// Reinitialize implements ports.OverlayReinitializer.
+func (m *MockOverlayPort) Reinitialize(ctx context.Context) error {
+	m.styleMu.Lock()
+	m.reinitializes++
+	m.styleMu.Unlock()
+
+	if m.ReinitializeFunc != nil {
+		return m.ReinitializeFunc(ctx)
+	}
+
+	return nil
+}
+
+// ReinitializeCount returns the number of times Reinitialize was called.
+func (m *MockOverlayPort) ReinitializeCount() int {
+	m.styleMu.Lock()
+	defer m.styleMu.Unlock()
+
+	return m.reinitializes
 }
 
 // recordGridPointerLocked stores the pointer a grid surface was last asked for.

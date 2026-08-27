@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -249,6 +250,16 @@ func (a *App) handleWakeFromSleep() {
 	a.logger.Info("Reinitializing input listeners after sleep/wake")
 
 	a.reinitializeHotkeysAfterSleep()
+
+	if a.overlayPort != nil {
+		a.logger.Info("Tearing down and re-creating overlay layer surfaces after sleep/wake")
+		_ = a.overlayPort.ClearFrame(context.Background())
+		if reinit, ok := a.overlayPort.(ports.OverlayReinitializer); ok {
+			_ = reinit.Reinitialize(context.Background())
+		} else {
+			_ = a.overlayPort.Refresh(context.Background())
+		}
+	}
 
 	a.logger.Info("Input listeners reinitialized after sleep/wake")
 }

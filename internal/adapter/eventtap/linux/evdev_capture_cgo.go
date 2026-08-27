@@ -34,6 +34,20 @@ func newWaylandEvdevCapture(logger *zap.Logger) (*waylandEvdevCapture, error) {
 		inotifyFd: -1,
 	}
 
+	virtualFile := capture.findVirtualDevice()
+	if virtualFile != nil {
+		capture.isVirtual = true
+		capture.files = []*os.File{virtualFile}
+		if logger != nil {
+			logger.Info(
+				"Found virtual keyboard remapper (e.g. Kanata); capturing virtual device only",
+				zap.String("device", virtualFile.Name()),
+			)
+		}
+
+		return capture, nil
+	}
+
 	for _, path := range paths {
 		file, openErr := os.Open(path)
 		if openErr != nil {
@@ -162,6 +176,9 @@ func (capture *waylandEvdevCapture) readLoop(file *os.File) {
 			// so we don't attempt to grab/query a stale fd on the next cycle.
 			capture.deviceMu.Lock()
 			capture.removeFileLocked(file)
+			if capture.isVirtual && len(capture.files) == 0 {
+				capture.isVirtual = false
+			}
 			capture.deviceMu.Unlock()
 			_ = file.Close()
 
@@ -206,6 +223,32 @@ func (capture *waylandEvdevCapture) grabAllLocked() error {
 		return nil
 	}
 
+	if capture.isVirtual {
+		if len(capture.files) == 0 {
+			virtualFile := capture.findVirtualDevice()
+			if virtualFile == nil {
+				capture.isVirtual = false
+
+				return fmt.Errorf("%w: virtual keyboard disappeared", errWaylandEvdevGrabFailed)
+			}
+			capture.files = []*os.File{virtualFile}
+			capture.startReader(virtualFile)
+		}
+
+		fd := C.int(capture.files[0].Fd())
+		if C.neru_evdev_grab(fd, 1) != 0 {
+			return fmt.Errorf(
+				"%w: failed to grab virtual keyboard %s",
+				errWaylandEvdevGrabFailed,
+				capture.files[0].Name(),
+			)
+		}
+
+		capture.grabbed = true
+
+		return nil
+	}
+
 	var grabbedFiles []*os.File
 	var failedFiles []string
 
@@ -231,8 +274,10 @@ func (capture *waylandEvdevCapture) grabAllLocked() error {
 			if C.neru_evdev_grab(kfd, 1) != 0 {
 				_ = virtualFile.Close()
 			} else {
+				capture.isVirtual = true
 				capture.files = []*os.File{virtualFile}
 				capture.grabbed = true
+				capture.startReader(virtualFile)
 
 				return nil
 			}
